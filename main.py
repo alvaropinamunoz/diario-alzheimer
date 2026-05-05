@@ -19,6 +19,7 @@ ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 GOOGLE_CREDENTIALS_JSON = os.environ["GOOGLE_CREDENTIALS_JSON"]
 SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]
 
+STATE_WAITING_DESCRIPCION = "waiting_descripcion"
 STATE_WAITING_LUGAR = "waiting_lugar"
 STATE_WAITING_PERSONAS = "waiting_personas"
 STATE_WAITING_GRAVEDAD = "waiting_gravedad"
@@ -70,7 +71,7 @@ def extract_data(text: str) -> dict:
     prompt = f"""Eres un asistente que ayuda a registrar episodios de pérdida de memoria de un paciente con Alzheimer.
 
 Un familiar ha escrito el siguiente mensaje describiendo un episodio. Extrae la información y devuelve ÚNICAMENTE un objeto JSON con estos campos:
-- descripcion: resumen breve y claro del episodio (siempre obligatorio)
+- descripcion: resumen breve y claro del episodio de pérdida de memoria. Si el mensaje no describe ningún episodio concreto o es demasiado vago para entender qué ocurrió, devuelve null
 - lugar: dónde ocurrió. Si no se menciona explícitamente, devuelve null
 - personas_presentes: quién estaba presente además del paciente. Si no se menciona, devuelve null
 - gravedad: clasifica como "Leve", "Moderada" o "Severa" solo si el texto da información suficiente. Si no puedes determinarlo con confianza, devuelve null
@@ -95,6 +96,9 @@ Mensaje: {text}"""
 
 def get_next_question(data: dict):
     """Devuelve (state, pregunta, keyboard) para el siguiente campo pendiente, o (None, None, None) si está completo."""
+
+    if not data.get("descripcion"):
+        return STATE_WAITING_DESCRIPCION, "No he entendido bien qué ocurrió. ¿Puedes describir el episodio con más detalle?", None
 
     if not data.get("lugar"):
         return STATE_WAITING_LUGAR, "¿Dónde ocurrió el episodio?", None
@@ -273,10 +277,19 @@ async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/borrar — elimina el último registro\n"
         "/borrar 3 — elimina los últimos 3 registros (máximo 5)\n\n"
         "ℹ️ *Otros*\n"
+        "/cancelar — cancela el registro que estás haciendo\n"
         "/start — mensaje de bienvenida\n"
         "/ayuda — muestra este menú",
         parse_mode="Markdown"
     )
+
+
+async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get("state") or context.user_data.get("pending_data"):
+        clear_pending(context)
+        await update.message.reply_text("❌ Registro cancelado. Puedes empezar de nuevo cuando quieras.")
+    else:
+        await update.message.reply_text("No hay ningún registro en curso.")
 
 
 async def borrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -482,6 +495,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     state = context.user_data.get("state")
 
+    if state == STATE_WAITING_DESCRIPCION:
+        context.user_data["pending_data"]["descripcion"] = message.text.strip()
+        await ask_next_question(message.reply_text, context)
+        return
+
     if state == STATE_WAITING_LUGAR:
         context.user_data["pending_data"]["lugar"] = message.text.strip()
         await ask_next_question(message.reply_text, context)
@@ -549,6 +567,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("ayuda", ayuda))
+    app.add_handler(CommandHandler("cancelar", cancelar))
     app.add_handler(CommandHandler("borrar", borrar))
     app.add_handler(CommandHandler("informe", informe))
     app.add_handler(CommandHandler("semana", semana))
