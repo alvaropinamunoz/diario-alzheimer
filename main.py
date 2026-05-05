@@ -22,11 +22,10 @@ SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]
 STATE_WAITING_LUGAR = "waiting_lugar"
 STATE_WAITING_PERSONAS = "waiting_personas"
 STATE_WAITING_GRAVEDAD = "waiting_gravedad"
-STATE_WAITING_TIPO = "waiting_tipo_olvido"
 STATE_WAITING_ESTADO = "waiting_estado"
 STATE_WAITING_CONSCIENTE = "waiting_consciente"
 
-BUTTON_STATES = {STATE_WAITING_GRAVEDAD, STATE_WAITING_TIPO, STATE_WAITING_ESTADO, STATE_WAITING_CONSCIENTE}
+BUTTON_STATES = {STATE_WAITING_GRAVEDAD, STATE_WAITING_ESTADO, STATE_WAITING_CONSCIENTE}
 
 COL_FECHA = 0
 COL_HORA = 1
@@ -44,11 +43,6 @@ CALLBACK_MAP = {
     "gravedad_leve":      ("gravedad",         "Leve"),
     "gravedad_moderada":  ("gravedad",         "Moderada"),
     "gravedad_severa":    ("gravedad",         "Severa"),
-    "tipo_reciente":      ("tipo_olvido",      "Memoria reciente"),
-    "tipo_remota":        ("tipo_olvido",      "Memoria remota"),
-    "tipo_personas":      ("tipo_olvido",      "Reconocimiento de personas"),
-    "tipo_espacial":      ("tipo_olvido",      "Orientación espacial"),
-    "tipo_temporal":      ("tipo_olvido",      "Orientación temporal"),
     "estado_tranquilo":   ("estado_paciente",  "Tranquilo/a"),
     "estado_agitado":     ("estado_paciente",  "Agitado/a"),
     "estado_triste":      ("estado_paciente",  "Triste/Deprimido/a"),
@@ -81,7 +75,7 @@ Un familiar ha escrito el siguiente mensaje describiendo un episodio. Extrae la 
 - personas_presentes: quién estaba presente además del paciente. Si no se menciona, devuelve null
 - gravedad: clasifica como "Leve", "Moderada" o "Severa" solo si el texto da información suficiente. Si no puedes determinarlo con confianza, devuelve null
 - notas_extra: cualquier detalle adicional relevante. Si no hay, devuelve cadena vacía ""
-- tipo_olvido: clasifica como "Memoria reciente", "Memoria remota", "Reconocimiento de personas", "Orientación espacial" u "Orientación temporal" solo si el texto lo indica claramente. Si no puedes determinarlo, devuelve null
+- tipo_olvido: clasifica SIEMPRE como "Memoria reciente", "Memoria remota", "Reconocimiento de personas", "Orientación espacial" u "Orientación temporal". Usa tu mejor criterio aunque no esté explícito en el texto
 - estado_paciente: estado anímico o físico del paciente en ese momento. Si no se menciona, devuelve null
 - consciente_olvido: si el paciente fue consciente de su propio olvido, devuelve "Sí" o "No". Si no se puede saber, devuelve null
 
@@ -115,16 +109,6 @@ def get_next_question(data: dict):
             InlineKeyboardButton("🔴 Severa", callback_data="gravedad_severa"),
         ]])
         return STATE_WAITING_GRAVEDAD, "¿Cómo de grave fue el episodio?", keyboard
-
-    if data.get("tipo_olvido") is None:
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🕐 Memoria reciente", callback_data="tipo_reciente")],
-            [InlineKeyboardButton("📚 Memoria remota", callback_data="tipo_remota")],
-            [InlineKeyboardButton("👥 Reconocimiento de personas", callback_data="tipo_personas")],
-            [InlineKeyboardButton("🗺️ Orientación espacial", callback_data="tipo_espacial")],
-            [InlineKeyboardButton("🕰️ Orientación temporal", callback_data="tipo_temporal")],
-        ])
-        return STATE_WAITING_TIPO, "¿Qué tipo de olvido fue?", keyboard
 
     if data.get("estado_paciente") is None:
         keyboard = InlineKeyboardMarkup([
