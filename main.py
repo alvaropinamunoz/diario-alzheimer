@@ -19,38 +19,46 @@ ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 GOOGLE_CREDENTIALS_JSON = os.environ["GOOGLE_CREDENTIALS_JSON"]
 SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]
 
-STATE_WAITING_DESCRIPCION = "waiting_descripcion"
-STATE_WAITING_LUGAR = "waiting_lugar"
-STATE_WAITING_PERSONAS = "waiting_personas"
-STATE_WAITING_GRAVEDAD = "waiting_gravedad"
-STATE_WAITING_ESTADO = "waiting_estado"
-STATE_WAITING_CONSCIENTE = "waiting_consciente"
+STATE_WAITING_DESCRIPCION    = "waiting_descripcion"
+STATE_WAITING_LUGAR          = "waiting_lugar"
+STATE_WAITING_PERSONAS       = "waiting_personas"        # botones multi-selección
+STATE_WAITING_PERSONAS_TEXTO = "waiting_personas_texto"  # texto libre (fallback)
+STATE_WAITING_ESTADO         = "waiting_estado"
+STATE_WAITING_CONSCIENTE     = "waiting_consciente"
 
-BUTTON_STATES = {STATE_WAITING_GRAVEDAD, STATE_WAITING_ESTADO, STATE_WAITING_CONSCIENTE}
+BUTTON_STATES = {STATE_WAITING_PERSONAS, STATE_WAITING_ESTADO, STATE_WAITING_CONSCIENTE}
 
-COL_FECHA = 0
-COL_HORA = 1
-COL_USUARIO = 2
+COL_FECHA      = 0
+COL_HORA       = 1
+COL_USUARIO    = 2
 COL_DESCRIPCION = 3
-COL_LUGAR = 4
-COL_PERSONAS = 5
-COL_GRAVEDAD = 6
-COL_NOTAS = 7
+COL_LUGAR      = 4
+COL_PERSONAS   = 5
+COL_GRAVEDAD   = 6
+COL_NOTAS      = 7
 COL_TIPO_OLVIDO = 8
-COL_ESTADO = 9
+COL_ESTADO     = 9
 COL_CONSCIENTE = 10
 
+PERSONAS_OPCIONES = ["Papa", "Rafa", "Álvaro", "Teresa", "Talía"]
+PERSONAS_MAP = {
+    "per_papa":   "Papa",
+    "per_rafa":   "Rafa",
+    "per_alvaro": "Álvaro",
+    "per_teresa": "Teresa",
+    "per_talia":  "Talía",
+    "per_todos":  "Todos",
+}
+
 CALLBACK_MAP = {
-    "gravedad_leve":      ("gravedad",         "Leve"),
-    "gravedad_moderada":  ("gravedad",         "Moderada"),
-    "gravedad_severa":    ("gravedad",         "Severa"),
-    "estado_tranquilo":   ("estado_paciente",  "Tranquilo/a"),
-    "estado_agitado":     ("estado_paciente",  "Agitado/a"),
-    "estado_triste":      ("estado_paciente",  "Triste/Deprimido/a"),
-    "estado_confuso":     ("estado_paciente",  "Confuso/a"),
-    "estado_normal":      ("estado_paciente",  "Normal/Bien"),
-    "consciente_si":      ("consciente_olvido","Sí"),
-    "consciente_no":      ("consciente_olvido","No"),
+    "estado_tranquilo": ("estado_paciente",  "Tranquilo/a"),
+    "estado_nerviosa":  ("estado_paciente",  "Nerviosa"),
+    "estado_triste":    ("estado_paciente",  "Triste/Deprimido/a"),
+    "estado_confuso":   ("estado_paciente",  "Confuso/a"),
+    "estado_normal":    ("estado_paciente",  "Normal/Bien"),
+    "consciente_si":    ("consciente_olvido", "Sí"),
+    "consciente_no":    ("consciente_olvido", "No"),
+    "consciente_nose":  ("consciente_olvido", "No lo sé"),
 }
 
 
@@ -74,13 +82,13 @@ Un familiar ha escrito el siguiente mensaje describiendo un episodio. Extrae la 
 - descripcion: resumen breve y claro del episodio de pérdida de memoria. Si el mensaje no describe ningún episodio concreto o es demasiado vago para entender qué ocurrió, devuelve null
 - lugar: dónde ocurrió. Si no se menciona explícitamente, devuelve null
 - personas_presentes: quién estaba presente además del paciente. Si no se menciona, devuelve null
-- gravedad: clasifica como "Leve", "Moderada" o "Severa" solo si el texto da información suficiente. Si no puedes determinarlo con confianza, devuelve null
+- gravedad: clasifica SIEMPRE como "Leve", "Moderada" o "Severa" según tu criterio. Orientación: Leve (olvido menor o puntual), Moderada (afecta la rutina o genera confusión notable), Severa (no reconoce personas, se pierde, olvida cosas básicas)
 - notas_extra: cualquier detalle adicional relevante. Si no hay, devuelve cadena vacía ""
 - tipo_olvido: clasifica SIEMPRE como "Memoria reciente", "Memoria remota", "Reconocimiento de personas", "Orientación espacial" u "Orientación temporal". Usa tu mejor criterio aunque no esté explícito en el texto
 - estado_paciente: estado anímico o físico del paciente en ese momento. Si no se menciona, devuelve null
 - consciente_olvido: si el paciente fue consciente de su propio olvido, devuelve "Sí" o "No". Si no se puede saber, devuelve null
 
-Devuelve null para cualquier campo que no puedas determinar. Nunca devuelvas "No indicado" ni cadenas vacías para campos opcionales.
+Devuelve null para los campos opcionales que no puedas determinar. Nunca devuelvas "No indicado" ni cadenas vacías para campos opcionales.
 Responde SOLO con el JSON. Sin texto adicional, sin bloques de código, sin explicaciones.
 
 Mensaje: {text}"""
@@ -94,7 +102,34 @@ Mensaje: {text}"""
     return json.loads(response.content[0].text)
 
 
-def get_next_question(data: dict):
+def build_personas_keyboard(seleccionadas: set) -> InlineKeyboardMarkup:
+    buttons = []
+    row = []
+    for persona in PERSONAS_OPCIONES:
+        label = f"✅ {persona}" if persona in seleccionadas else persona
+        key = "per_" + persona.lower().replace("á", "a").replace("í", "i")
+        row.append(InlineKeyboardButton(label, callback_data=key))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+
+    todos_label = "✅ Todos" if "Todos" in seleccionadas else "Todos"
+    buttons.append([InlineKeyboardButton(todos_label, callback_data="per_todos")])
+
+    n = len(seleccionadas)
+    if n:
+        confirm_label = f"✅ Confirmar ({n} seleccionado{'s' if n != 1 else ''})"
+    else:
+        confirm_label = "Confirmar selección"
+    buttons.append([InlineKeyboardButton(confirm_label, callback_data="per_confirmar")])
+    buttons.append([InlineKeyboardButton("✏️ Escribir manualmente", callback_data="per_escribir")])
+
+    return InlineKeyboardMarkup(buttons)
+
+
+def get_next_question(data: dict, context: ContextTypes.DEFAULT_TYPE):
     """Devuelve (state, pregunta, keyboard) para el siguiente campo pendiente, o (None, None, None) si está completo."""
 
     if not data.get("descripcion"):
@@ -104,31 +139,25 @@ def get_next_question(data: dict):
         return STATE_WAITING_LUGAR, "¿Dónde ocurrió el episodio?", None
 
     if not data.get("personas_presentes"):
-        return STATE_WAITING_PERSONAS, "¿Quién estaba presente además del paciente?\n(Si estaba solo, escribe «Solo»)", None
-
-    if data.get("gravedad") is None:
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("🟡 Leve", callback_data="gravedad_leve"),
-            InlineKeyboardButton("🟠 Moderada", callback_data="gravedad_moderada"),
-            InlineKeyboardButton("🔴 Severa", callback_data="gravedad_severa"),
-        ]])
-        return STATE_WAITING_GRAVEDAD, "¿Cómo de grave fue el episodio?", keyboard
+        seleccionadas = context.user_data.get("personas_seleccionadas", set())
+        return STATE_WAITING_PERSONAS, "¿Quién estaba presente además del paciente?", build_personas_keyboard(seleccionadas)
 
     if data.get("estado_paciente") is None:
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("😌 Tranquilo/a", callback_data="estado_tranquilo"),
-             InlineKeyboardButton("😰 Agitado/a", callback_data="estado_agitado")],
+             InlineKeyboardButton("😬 Nerviosa",    callback_data="estado_nerviosa")],
             [InlineKeyboardButton("😢 Triste/Deprimido/a", callback_data="estado_triste"),
-             InlineKeyboardButton("😵 Confuso/a", callback_data="estado_confuso")],
+             InlineKeyboardButton("😵 Confuso/a",   callback_data="estado_confuso")],
             [InlineKeyboardButton("😊 Normal/Bien", callback_data="estado_normal")],
         ])
         return STATE_WAITING_ESTADO, "¿Cómo estaba el paciente en ese momento?", keyboard
 
     if data.get("consciente_olvido") is None:
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("Sí", callback_data="consciente_si"),
-            InlineKeyboardButton("No", callback_data="consciente_no"),
-        ]])
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Sí", callback_data="consciente_si"),
+             InlineKeyboardButton("No", callback_data="consciente_no")],
+            [InlineKeyboardButton("No lo sé", callback_data="consciente_nose")],
+        ])
         return STATE_WAITING_CONSCIENTE, "¿El paciente fue consciente de su propio olvido?", keyboard
 
     return None, None, None
@@ -137,7 +166,7 @@ def get_next_question(data: dict):
 async def ask_next_question(responder, context: ContextTypes.DEFAULT_TYPE):
     """Envía la siguiente pregunta pendiente o guarda y confirma si ya está todo completo."""
     data = context.user_data["pending_data"]
-    state, question, keyboard = get_next_question(data)
+    state, question, keyboard = get_next_question(data, context)
 
     if state is None:
         user_name = context.user_data["user_name"]
@@ -195,7 +224,7 @@ async def save_to_sheet(data: dict, user_name: str, fecha: str, hora: str):
 
 
 def clear_pending(context: ContextTypes.DEFAULT_TYPE):
-    for key in ("state", "pending_data", "user_name", "fecha", "hora"):
+    for key in ("state", "pending_data", "user_name", "fecha", "hora", "personas_seleccionadas"):
         context.user_data.pop(key, None)
 
 
@@ -505,7 +534,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await ask_next_question(message.reply_text, context)
         return
 
-    if state == STATE_WAITING_PERSONAS:
+    if state == STATE_WAITING_PERSONAS_TEXTO:
         context.user_data["pending_data"]["personas_presentes"] = message.text.strip()
         await ask_next_question(message.reply_text, context)
         return
@@ -541,6 +570,45 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await message.reply_text("❌ Hubo un error al registrar el episodio. Por favor inténtalo de nuevo.")
 
 
+async def _handle_persona_callback(query, context: ContextTypes.DEFAULT_TYPE, data: dict):
+    cmd = query.data
+    seleccionadas = context.user_data.get("personas_seleccionadas", set())
+
+    if cmd == "per_escribir":
+        context.user_data.pop("personas_seleccionadas", None)
+        context.user_data["state"] = STATE_WAITING_PERSONAS_TEXTO
+        await query.edit_message_text("Escribe quién estaba presente (ej: «Papa y Teresa», «Solo», «Todos»):")
+        return
+
+    if cmd == "per_confirmar":
+        if not seleccionadas:
+            await query.answer("Selecciona al menos una persona o usa 'Escribir manualmente'", show_alert=True)
+            return
+        orden = {p: i for i, p in enumerate(PERSONAS_OPCIONES + ["Todos"])}
+        data["personas_presentes"] = ", ".join(sorted(seleccionadas, key=lambda x: orden.get(x, 99)))
+        context.user_data.pop("personas_seleccionadas", None)
+        await ask_next_question(query.edit_message_text, context)
+        return
+
+    # Toggle persona
+    nombre = PERSONAS_MAP.get(cmd)
+    if not nombre:
+        return
+
+    if nombre == "Todos":
+        seleccionadas = set() if "Todos" in seleccionadas else {"Todos"}
+    else:
+        if "Todos" in seleccionadas:
+            seleccionadas = {nombre}
+        elif nombre in seleccionadas:
+            seleccionadas.discard(nombre)
+        else:
+            seleccionadas.add(nombre)
+
+    context.user_data["personas_seleccionadas"] = seleccionadas
+    await query.edit_message_reply_markup(build_personas_keyboard(seleccionadas))
+
+
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -548,17 +616,23 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = context.user_data.get("state")
     data = context.user_data.get("pending_data")
 
-    if data is None or state not in BUTTON_STATES:
+    if data is None:
         await query.edit_message_text("Esta respuesta ya no es válida. Envía un nuevo mensaje para registrar un episodio.")
         return
 
-    if query.data not in CALLBACK_MAP:
+    if query.data.startswith("per_"):
+        if state != STATE_WAITING_PERSONAS:
+            await query.edit_message_text("Esta respuesta ya no es válida. Envía un nuevo mensaje.")
+            return
+        await _handle_persona_callback(query, context, data)
+        return
+
+    if state not in BUTTON_STATES or query.data not in CALLBACK_MAP:
         await query.edit_message_text("Respuesta no reconocida. Envía un nuevo mensaje.")
         return
 
     field, value = CALLBACK_MAP[query.data]
     data[field] = value
-
     await ask_next_question(query.edit_message_text, context)
 
 
